@@ -11,6 +11,8 @@ import 'package:sankatmitra/data/repositories/location_repository.dart';
 import 'package:sankatmitra/data/services/connectivity_service.dart';
 import 'package:sankatmitra/data/services/ai_triage_service.dart';
 import 'package:sankatmitra/features/shared/widgets/layer_status_bar.dart';
+import 'package:sankatmitra/features/shared/widgets/layer_alert_banner.dart';
+import 'package:sankatmitra/data/services/demo_seed_service.dart';
 
 class HomeScreen extends StatefulWidget {
   final UserModel? user;
@@ -28,6 +30,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   ConnectivityLayer _currentLayer = ConnectivityLayer.cloud;
   bool _isSOS = false;
   bool _isInitialized = false;
+  bool _isDemoMode = false;
+  final DemoSeedService _demoSeed = DemoSeedService();
+  StreamSubscription? _demoSub;
 
   late AnimationController _pulseController;
   late AnimationController _radarController;
@@ -324,6 +329,31 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     _repo.cancelSOS();
   }
 
+  // ── Demo seed mode ──────────────────────────────────────────────────────
+  void _toggleDemoMode() {
+    HapticFeedback.mediumImpact();
+    if (_isDemoMode) {
+      _demoSub?.cancel();
+      _demoSeed.stopDemo();
+      setState(() {
+        _isDemoMode = false;
+        _users = [];
+      });
+    } else {
+      // Use current user's location as base, or default to Vadodara
+      final baseLat = _repo.currentUser?.lat ?? 22.3072;
+      final baseLng = _repo.currentUser?.lng ?? 73.1812;
+      _demoSeed.startDemo(baseLat: baseLat, baseLng: baseLng);
+      _demoSub = _demoSeed.stream.listen((users) {
+        if (mounted) {
+          setState(() => _users = users);
+          _fitMarkers(users);
+        }
+      });
+      setState(() => _isDemoMode = true);
+    }
+  }
+
   // ── Priority badge widget ───────────────────────────────────────────────
   Widget _priorityBadge(String priority) {
     if (priority.isEmpty) return const SizedBox.shrink();
@@ -331,16 +361,19 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     final colorHex = AiTriageService.priorityColor(priority);
     final color = _hexColor(colorHex);
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
       decoration: BoxDecoration(
         color: color.withOpacity(0.15),
-        borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: color.withOpacity(0.6)),
+        borderRadius: BorderRadius.circular(5),
+        border: Border.all(color: color.withOpacity(0.7)),
       ),
       child: Text(
         '$priority · $label',
         style: TextStyle(
-            color: color, fontSize: 9, fontWeight: FontWeight.w900, letterSpacing: 0.5),
+            color: color, fontSize: 8, fontWeight: FontWeight.w900, letterSpacing: 0.3),
+        maxLines: 1,
+        softWrap: false,
+        overflow: TextOverflow.visible,
       ),
     );
   }
@@ -354,6 +387,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   void dispose() {
     _usersSub?.cancel();
     _layerSub?.cancel();
+    _demoSub?.cancel();
+    _demoSeed.stopDemo();
     _pulseController.dispose();
     _radarController.dispose();
     _repo.dispose();
@@ -455,6 +490,18 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                   letterSpacing: 1),
             ),
           ),
+          // Demo seed button
+          Tooltip(
+            message: _isDemoMode ? 'Stop Demo' : 'Load Demo Data',
+            child: IconButton(
+              icon: Icon(
+                _isDemoMode ? Icons.stop_circle_rounded : Icons.play_circle_rounded,
+                size: 20,
+                color: _isDemoMode ? AppTheme.primaryRed : const Color(0xFFFFD54F),
+              ),
+              onPressed: _toggleDemoMode,
+            ),
+          ),
           IconButton(
             icon: const Icon(Icons.dashboard_customize_rounded, size: 20),
             color: AppTheme.alertBlue,
@@ -475,7 +522,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
               children: [
                 TileLayer(
                   urlTemplate:
-                  'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                  'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+                  subdomains: const ['a', 'b', 'c', 'd'],
                   userAgentPackageName: 'com.example.sankatmitra',
                 ),
                 CircleLayer(
@@ -508,14 +556,17 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                     }
                     return Marker(
                       point: LatLng(u.lat, u.lng),
-                      width: 60,
-                      height: 76,
+                      width: 72,
+                      height: u.priority.isNotEmpty ? 100 : 72,
+                      alignment: Alignment.bottomCenter,
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.center,
                         children: [
-                          // Priority badge above marker (NEW)
+                          // Priority badge above marker
                           if (u.priority.isNotEmpty)
                             _priorityBadge(u.priority),
+                          const SizedBox(height: 2),
                           Container(
                             width: 36, height: 36,
                             decoration: BoxDecoration(
@@ -534,10 +585,11 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                           ),
                           // Name label
                           Container(
+                            constraints: const BoxConstraints(maxWidth: 68),
                             padding: const EdgeInsets.symmetric(
-                                horizontal: 4, vertical: 1),
+                                horizontal: 4, vertical: 2),
                             decoration: BoxDecoration(
-                              color: AppTheme.bgCard.withOpacity(0.85),
+                              color: AppTheme.bgCard.withOpacity(0.9),
                               borderRadius: BorderRadius.circular(4),
                             ),
                             child: Text(
@@ -547,9 +599,11 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                                   fontSize: 8,
                                   fontWeight: FontWeight.w700),
                               overflow: TextOverflow.ellipsis,
+                              maxLines: 1,
+                              textAlign: TextAlign.center,
                             ),
                           ),
-                          Container(width: 2, height: 6, color: c),
+                          Container(width: 2, height: 5, color: c),
                         ],
                       ),
                     );
@@ -585,6 +639,43 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
               ),
             ),
           ),
+
+          // ── Layer alert banner (dramatic animated switch notification) ──
+          Positioned(
+            top: 0, left: 0, right: 0,
+            child: SafeArea(
+              bottom: false,
+              child: LayerAlertBanner(layerStream: _repo.layerStream),
+            ),
+          ),
+
+          // ── Demo mode ribbon ────────────────────────────────────────────
+          if (_isDemoMode)
+            Positioned(
+              top: 98, left: 0, right: 0,
+              child: Center(
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFFD54F).withOpacity(0.9),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: const Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.science_rounded, size: 12, color: Colors.black),
+                      SizedBox(width: 4),
+                      Text('DEMO MODE — 5 simulated users',
+                          style: TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w900,
+                              color: Colors.black,
+                              letterSpacing: 0.5)),
+                    ],
+                  ),
+                ),
+              ),
+            ),
 
           // ── Layer status ───────────────────────────────────────────────
           Positioned(

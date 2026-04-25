@@ -48,7 +48,7 @@ class _SplashScreenState extends State<SplashScreen>
 
     Timer(const Duration(seconds: 3), () {
       if (mounted) {
-        Navigator.pushReplacementNamed(context, AppRouter.roleSelection);
+        Navigator.pushReplacementNamed(context, AppRouter.pitch);
       }
     });
   }
@@ -208,20 +208,20 @@ class _LoadingDotsState extends State<_LoadingDots>
     super.initState();
     _controllers = List.generate(
       3,
-      (i) => AnimationController(
+          (i) => AnimationController(
         vsync: this,
         duration: const Duration(milliseconds: 600),
       )..repeat(
-          reverse: true,
-          period: Duration(milliseconds: 600 + i * 150),
-        ),
+        reverse: true,
+        period: Duration(milliseconds: 600 + i * 150),
+      ),
     );
     _anims = _controllers
         .map((c) =>
-            Tween<double>(begin: 0.3, end: 1.0).animate(CurvedAnimation(
-              parent: c,
-              curve: Curves.easeInOut,
-            )))
+        Tween<double>(begin: 0.3, end: 1.0).animate(CurvedAnimation(
+          parent: c,
+          curve: Curves.easeInOut,
+        )))
         .toList();
 
     for (var i = 0; i < _controllers.length; i++) {

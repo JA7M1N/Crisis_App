@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:sankatmitra/features/splash/splash_screen.dart';
+import 'package:sankatmitra/features/pitch/pitch_screen.dart';
 import 'package:sankatmitra/features/role_selection/role_selection_screen.dart';
 import 'package:sankatmitra/features/home/home_screen.dart';
 import 'package:sankatmitra/features/dashboard/coordinator_dashboard.dart';
@@ -7,6 +8,7 @@ import 'package:sankatmitra/data/models/user_model.dart';
 
 class AppRouter {
   static const String splash = '/';
+  static const String pitch = '/pitch';           // NEW
   static const String roleSelection = '/role-selection';
   static const String home = '/home';
   static const String dashboard = '/dashboard';
@@ -15,6 +17,8 @@ class AppRouter {
     switch (settings.name) {
       case splash:
         return _fadeRoute(const SplashScreen(), settings);
+      case pitch:                                   // NEW
+        return _fadeRoute(const PitchScreen(), settings);
       case roleSelection:
         return _fadeRoute(const RoleSelectionScreen(), settings);
       case home:

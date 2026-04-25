@@ -28,6 +28,7 @@ class LocationRepository {
   StreamController<List<UserModel>>.broadcast();
 
   Stream<List<UserModel>> get usersStream => _usersController.stream;
+  UserModel? get currentUser => _currentUser; // expose for demo seed positioning
 
   LocationRepository({
     LocationService? locationService,
