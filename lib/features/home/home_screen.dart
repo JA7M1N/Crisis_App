@@ -1,9 +1,12 @@
 import 'dart:async';
 import 'dart:math';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
+import 'package:http/http.dart' as http;
+import 'package:url_launcher/url_launcher.dart';
 import 'package:sankatmitra/core/theme/app_theme.dart';
 import 'package:sankatmitra/core/routes/app_router.dart';
 import 'package:sankatmitra/data/models/user_model.dart';
@@ -41,6 +44,11 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
   StreamSubscription? _usersSub;
   StreamSubscription? _layerSub;
+
+  // ── Navigation / routing state ─────────────────────────────────────────
+  UserModel? _navigatingTo;
+  List<LatLng> _routePoints = [];
+  bool _routeLoading = false;
 
   @override
   void initState() {
@@ -394,6 +402,289 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     return Color(int.parse('FF$hex', radix: 16));
   }
 
+  // ── Navigation helpers ─────────────────────────────────────────────────
+
+  /// Fetch road route from OSRM (free, no API key)
+  Future<void> _fetchRoute(double fromLat, double fromLng, double toLat, double toLng) async {
+    if (mounted) setState(() => _routeLoading = true);
+    try {
+      final url = Uri.parse(
+        'https://router.project-osrm.org/route/v1/driving/'
+        '$fromLng,$fromLat;$toLng,$toLat'
+        '?overview=full&geometries=geojson',
+      );
+      final res = await http.get(url).timeout(const Duration(seconds: 8));
+      if (res.statusCode == 200) {
+        final data = jsonDecode(res.body);
+        final coords = data['routes'][0]['geometry']['coordinates'] as List;
+        final points = coords.map<LatLng>((c) => LatLng(c[1].toDouble(), c[0].toDouble())).toList();
+        if (mounted) setState(() => _routePoints = points);
+      }
+    } catch (_) {
+      // Silently fall back — Google Maps still works
+    } finally {
+      if (mounted) setState(() => _routeLoading = false);
+    }
+  }
+
+  /// Open Google Maps turn-by-turn navigation (free, no API key needed)
+  Future<void> _openGoogleMaps(UserModel victim) async {
+    final me = _repo.currentUser;
+    if (me == null) return;
+    // Google Maps directions URL — works on Android & iOS, opens app if installed
+    final uri = Uri.parse(
+      'https://www.google.com/maps/dir/?api=1'
+      '&origin=${me.lat},${me.lng}'
+      '&destination=${victim.lat},${victim.lng}'
+      '&travelmode=driving',
+    );
+    if (await canLaunchUrl(uri)) {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    }
+  }
+
+  /// Show victim info + navigation options bottom sheet (responder only)
+  void _showVictimNavSheet(UserModel victim) {
+    final me = _repo.currentUser;
+    if (me == null) return;
+
+    // Kick off in-app route fetch immediately
+    _fetchRoute(me.lat, me.lng, victim.lat, victim.lng);
+
+    // Fly map camera to show both points
+    _mapController.fitCamera(CameraFit.bounds(
+      bounds: LatLngBounds(
+        LatLng(
+          me.lat < victim.lat ? me.lat - 0.003 : victim.lat - 0.003,
+          me.lng < victim.lng ? me.lng - 0.003 : victim.lng - 0.003,
+        ),
+        LatLng(
+          me.lat > victim.lat ? me.lat + 0.003 : victim.lat + 0.003,
+          me.lng > victim.lng ? me.lng + 0.003 : victim.lng + 0.003,
+        ),
+      ),
+      padding: const EdgeInsets.all(80),
+    ));
+
+    setState(() => _navigatingTo = victim);
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: AppTheme.bgCard,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheet) => Padding(
+          padding: const EdgeInsets.fromLTRB(24, 20, 24, 36),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Handle
+              Center(
+                child: Container(
+                  width: 36, height: 4,
+                  decoration: BoxDecoration(
+                    color: AppTheme.textSecondary,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 18),
+
+              // Victim header
+              Row(
+                children: [
+                  Container(
+                    width: 46, height: 46,
+                    decoration: BoxDecoration(
+                      color: (victim.isSOS ? AppTheme.primaryRed : AppTheme.accentOrange).withOpacity(0.15),
+                      shape: BoxShape.circle,
+                    ),
+                    child: Icon(
+                      victim.isSOS ? Icons.sos_rounded : Icons.person_pin_circle_outlined,
+                      color: victim.isSOS ? AppTheme.primaryRed : AppTheme.accentOrange,
+                      size: 22,
+                    ),
+                  ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          victim.displayName,
+                          style: const TextStyle(
+                            color: AppTheme.textPrimary,
+                            fontSize: 17,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                        Row(
+                          children: [
+                            if (victim.priority.isNotEmpty) ...[
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: _hexColor(AiTriageService.priorityColor(victim.priority)).withOpacity(0.15),
+                                  borderRadius: BorderRadius.circular(5),
+                                  border: Border.all(color: _hexColor(AiTriageService.priorityColor(victim.priority)).withOpacity(0.7)),
+                                ),
+                                child: Text(
+                                  '${victim.priority} · ${AiTriageService.priorityLabel(victim.priority)}',
+                                  style: TextStyle(
+                                    color: _hexColor(AiTriageService.priorityColor(victim.priority)),
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.w800,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 6),
+                            ],
+                            if (victim.isSOS)
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: AppTheme.primaryRed,
+                                  borderRadius: BorderRadius.circular(5),
+                                ),
+                                child: const Text('SOS ACTIVE',
+                                  style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.w900),
+                                ),
+                              ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+
+              const SizedBox(height: 18),
+              const Divider(color: Color(0x15FFFFFF)),
+              const SizedBox(height: 14),
+
+              // Location info
+              Row(
+                children: [
+                  const Icon(Icons.location_on_rounded, color: AppTheme.textSecondary, size: 14),
+                  const SizedBox(width: 6),
+                  Text(
+                    '${victim.lat.toStringAsFixed(5)}, ${victim.lng.toStringAsFixed(5)}',
+                    style: const TextStyle(color: AppTheme.textSecondary, fontSize: 12, fontFamily: 'monospace'),
+                  ),
+                  const SizedBox(width: 8),
+                  const Icon(Icons.access_time_rounded, color: AppTheme.textSecondary, size: 12),
+                  const SizedBox(width: 4),
+                  Text(
+                    _lastSeen(victim.timestamp),
+                    style: const TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+                  ),
+                ],
+              ),
+
+              const SizedBox(height: 20),
+
+              // Route status hint
+              if (_routeLoading)
+                const Padding(
+                  padding: EdgeInsets.only(bottom: 12),
+                  child: Row(
+                    children: [
+                      SizedBox(width: 14, height: 14,
+                        child: CircularProgressIndicator(strokeWidth: 2, color: AppTheme.alertBlue)),
+                      SizedBox(width: 8),
+                      Text('Loading route on map...', style: TextStyle(color: AppTheme.alertBlue, fontSize: 12)),
+                    ],
+                  ),
+                )
+              else if (_routePoints.isNotEmpty)
+                const Padding(
+                  padding: EdgeInsets.only(bottom: 12),
+                  child: Row(
+                    children: [
+                      Icon(Icons.route_rounded, color: AppTheme.safeGreen, size: 14),
+                      SizedBox(width: 6),
+                      Text('Route shown on map', style: TextStyle(color: AppTheme.safeGreen, fontSize: 12, fontWeight: FontWeight.w600)),
+                    ],
+                  ),
+                ),
+
+              // Action buttons
+              Row(
+                children: [
+                  // In-app route button
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: () {
+                        Navigator.pop(ctx);
+                        if (_routePoints.isEmpty) {
+                          final me2 = _repo.currentUser;
+                          if (me2 != null) _fetchRoute(me2.lat, me2.lng, victim.lat, victim.lng);
+                        }
+                      },
+                      icon: const Icon(Icons.map_rounded, size: 16),
+                      label: const Text('Show Route'),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: AppTheme.alertBlue,
+                        side: const BorderSide(color: AppTheme.alertBlue),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  // Google Maps button
+                  Expanded(
+                    flex: 2,
+                    child: ElevatedButton.icon(
+                      onPressed: () {
+                        Navigator.pop(ctx);
+                        _openGoogleMaps(victim);
+                      },
+                      icon: const Icon(Icons.navigation_rounded, size: 18, color: Colors.white),
+                      label: const Text(
+                        'Google Maps',
+                        style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800, letterSpacing: 0.5),
+                      ),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF4285F4),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+
+              const SizedBox(height: 8),
+
+              // Clear route
+              if (_navigatingTo != null)
+                Center(
+                  child: TextButton(
+                    onPressed: () {
+                      Navigator.pop(ctx);
+                      setState(() {
+                        _navigatingTo = null;
+                        _routePoints = [];
+                      });
+                    },
+                    child: const Text('Clear navigation',
+                      style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    ).whenComplete(() {
+      // Don't clear route on dismiss — keep line on map until manually cleared
+    });
+  }
+
   @override
   void dispose() {
     _usersSub?.cancel();
@@ -550,6 +841,33 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                   ))
                       .toList(),
                 ),
+                // ── Route polyline (responder navigation) ─────────────────
+                if (_routePoints.isNotEmpty)
+                  PolylineLayer(
+                    polylines: [
+                      Polyline(
+                        points: _routePoints,
+                        strokeWidth: 4.5,
+                        color: const Color(0xFF4285F4),
+                        borderStrokeWidth: 2,
+                        borderColor: Colors.white24,
+                      ),
+                    ],
+                  ),
+                // ── Destination ring for navigating-to victim ─────────────
+                if (_navigatingTo != null)
+                  CircleLayer(
+                    circles: [
+                      CircleMarker(
+                        point: LatLng(_navigatingTo!.lat, _navigatingTo!.lng),
+                        radius: 28,
+                        color: const Color(0x334285F4),
+                        borderColor: const Color(0xFF4285F4),
+                        borderStrokeWidth: 2.5,
+                        useRadiusInMeter: false,
+                      ),
+                    ],
+                  ),
                 MarkerLayer(
                   markers: _users.where((u) => u.lat != 0).map((u) {
                     final isMe = u.userId == widget.user?.userId;
@@ -565,12 +883,17 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                       c = u.isSOS ? AppTheme.primaryRed : AppTheme.accentOrange;
                       ico = u.isSOS ? Icons.sos_rounded : Icons.person_pin_rounded;
                     }
+                    // Responders can tap victim markers to navigate
+                    final isNavigating = _navigatingTo?.userId == u.userId;
+                    final tappable = !isMe && role == UserRole.responder && u.role == UserRole.victim;
                     return Marker(
                       point: LatLng(u.lat, u.lng),
                       width: 80,
                       height: u.priority.isNotEmpty ? 116 : 88,
                       alignment: Alignment.bottomCenter,
-                      child: Column(
+                      child: GestureDetector(
+                        onTap: tappable ? () => _showVictimNavSheet(u) : null,
+                        child: Column(
                         mainAxisSize: MainAxisSize.min,
                         crossAxisAlignment: CrossAxisAlignment.center,
                         children: [
@@ -578,21 +901,38 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                           if (u.priority.isNotEmpty)
                             _priorityBadge(u.priority),
                           const SizedBox(height: 2),
-                          Container(
-                            width: 36, height: 36,
-                            decoration: BoxDecoration(
-                              color: c,
-                              shape: BoxShape.circle,
-                              border:
-                              Border.all(color: Colors.white, width: 2),
-                              boxShadow: [
-                                BoxShadow(
-                                    color: c.withOpacity(0.6),
-                                    blurRadius: 8,
-                                    spreadRadius: 2)
-                              ],
-                            ),
-                            child: Icon(ico, color: Colors.white, size: 18),
+                          // Navigation ring if this victim is selected
+                          Stack(
+                            alignment: Alignment.center,
+                            children: [
+                              if (isNavigating)
+                                Container(
+                                  width: 44, height: 44,
+                                  decoration: BoxDecoration(
+                                    shape: BoxShape.circle,
+                                    border: Border.all(color: const Color(0xFF4285F4), width: 2.5),
+                                    color: const Color(0x334285F4),
+                                  ),
+                                ),
+                              Container(
+                                width: 36, height: 36,
+                                decoration: BoxDecoration(
+                                  color: isNavigating ? const Color(0xFF4285F4) : c,
+                                  shape: BoxShape.circle,
+                                  border: Border.all(color: Colors.white, width: 2),
+                                  boxShadow: [
+                                    BoxShadow(
+                                        color: (isNavigating ? const Color(0xFF4285F4) : c).withOpacity(0.6),
+                                        blurRadius: isNavigating ? 14 : 8,
+                                        spreadRadius: isNavigating ? 4 : 2)
+                                  ],
+                                ),
+                                child: Icon(
+                                  isNavigating ? Icons.navigation_rounded : ico,
+                                  color: Colors.white, size: 18,
+                                ),
+                              ),
+                            ],
                           ),
                           // Name + last seen label
                           Container(
@@ -600,16 +940,21 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                             padding: const EdgeInsets.symmetric(
                                 horizontal: 4, vertical: 2),
                             decoration: BoxDecoration(
-                              color: AppTheme.bgCard.withOpacity(0.9),
+                              color: isNavigating
+                                  ? const Color(0xFF4285F4).withOpacity(0.15)
+                                  : AppTheme.bgCard.withOpacity(0.9),
                               borderRadius: BorderRadius.circular(4),
+                              border: isNavigating
+                                  ? Border.all(color: const Color(0xFF4285F4), width: 1)
+                                  : null,
                             ),
                             child: Column(
                               mainAxisSize: MainAxisSize.min,
                               children: [
                                 Text(
                                   u.displayName,
-                                  style: const TextStyle(
-                                      color: AppTheme.textPrimary,
+                                  style: TextStyle(
+                                      color: isNavigating ? const Color(0xFF4285F4) : AppTheme.textPrimary,
                                       fontSize: 8,
                                       fontWeight: FontWeight.w700),
                                   overflow: TextOverflow.ellipsis,
@@ -626,8 +971,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                               ],
                             ),
                           ),
-                          Container(width: 2, height: 5, color: c),
+                          Container(width: 2, height: 5, color: isNavigating ? const Color(0xFF4285F4) : c),
                         ],
+                      ),
                       ),
                     );
                   }).toList(),
@@ -949,6 +1295,29 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                                         color: AppTheme.primaryRed,
                                         fontSize: 11,
                                         fontWeight: FontWeight.w700),
+                                  ),
+                                // Navigation status
+                                if (_navigatingTo != null)
+                                  Row(
+                                    children: [
+                                      const Icon(Icons.navigation_rounded, color: Color(0xFF4285F4), size: 12),
+                                      const SizedBox(width: 4),
+                                      Expanded(
+                                        child: Text(
+                                          'Navigating → ${_navigatingTo!.displayName}',
+                                          style: const TextStyle(
+                                              color: Color(0xFF4285F4),
+                                              fontSize: 11,
+                                              fontWeight: FontWeight.w700),
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                      ),
+                                    ],
+                                  )
+                                else
+                                  const Text(
+                                    '📍 Tap a victim marker to navigate',
+                                    style: TextStyle(color: AppTheme.textSecondary, fontSize: 11),
                                   ),
                               ],
                             ),
