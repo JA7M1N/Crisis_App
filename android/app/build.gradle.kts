@@ -1,6 +1,6 @@
 plugins {
     id("com.android.application")
-    id("kotlin-android")
+    id("org.jetbrains.kotlin.android")
     // REMOVED: id("com.google.gms.google-services") -- No Firebase/Google Services needed
     id("dev.flutter.flutter-gradle-plugin")
 }
@@ -21,7 +21,7 @@ android {
 
     defaultConfig {
         applicationId = "com.example.sankatmitra"
-        minSdk = 23
+        minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName

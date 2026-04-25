@@ -54,6 +54,8 @@ class _CoordinatorDashboardState extends State<CoordinatorDashboard>
 
     _usersSub = _supabase.streamAllUsers().listen((users) {
       if (mounted) {
+        const order = {'P0': 0, 'P1': 1, 'P2': 2, 'P3': 3};
+        users.sort((a, b) => (order[a.priority] ?? 4).compareTo(order[b.priority] ?? 4));
         setState(() => _users = users);
         _fitAll(users);
       }
@@ -442,6 +444,17 @@ class _UserChip extends StatelessWidget {
   final UserModel user;
   const _UserChip({required this.user});
 
+  String _lastSeen(int timestamp) {
+    if (timestamp == 0) return 'just now';
+    final diff = DateTime.now().millisecondsSinceEpoch - timestamp;
+    final mins = (diff / 60000).floor();
+    if (mins < 1) return 'just now';
+    if (mins == 1) return '1 min ago';
+    if (mins < 60) return '$mins min ago';
+    final hrs = (mins / 60).floor();
+    return '${hrs}h ago';
+  }
+
   @override
   Widget build(BuildContext context) {
     final color = user.role == UserRole.responder
@@ -482,6 +495,18 @@ class _UserChip extends StatelessWidget {
                   child: const Text('SOS', style: TextStyle(color: Colors.white, fontSize: 8, fontWeight: FontWeight.w900)),
                 ),
               ],
+              if (user.priority.isNotEmpty) ...[
+                const SizedBox(width: 6),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                  decoration: BoxDecoration(
+                    color: AppTheme.alertBlue.withOpacity(0.2),
+                    borderRadius: BorderRadius.circular(4),
+                    border: Border.all(color: AppTheme.alertBlue.withOpacity(0.6)),
+                  ),
+                  child: Text(user.priority, style: const TextStyle(color: AppTheme.alertBlue, fontSize: 8, fontWeight: FontWeight.w900)),
+                ),
+              ],
             ],
           ),
           const SizedBox(height: 4),
@@ -494,8 +519,8 @@ class _UserChip extends StatelessWidget {
             style: const TextStyle(color: AppTheme.textSecondary, fontSize: 9),
           ),
           Text(
-            'SID: ${user.sessionId.length > 8 ? user.sessionId.substring(0, 8) : user.sessionId}',
-            style: const TextStyle(color: AppTheme.textSecondary, fontSize: 9),
+            '🕐 ${_lastSeen(user.timestamp)}',
+            style: const TextStyle(color: AppTheme.textSecondary, fontSize: 9, fontWeight: FontWeight.w600),
           ),
         ],
       ),

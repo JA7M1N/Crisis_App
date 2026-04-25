@@ -378,6 +378,17 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     );
   }
 
+  String _lastSeen(int timestamp) {
+    if (timestamp == 0) return 'just now';
+    final diff = DateTime.now().millisecondsSinceEpoch - timestamp;
+    final mins = (diff / 60000).floor();
+    if (mins < 1) return 'just now';
+    if (mins == 1) return '1 min ago';
+    if (mins < 60) return '$mins min ago';
+    final hrs = (mins / 60).floor();
+    return '${hrs}h ago';
+  }
+
   Color _hexColor(String hex) {
     hex = hex.replaceFirst('#', '');
     return Color(int.parse('FF$hex', radix: 16));
@@ -556,8 +567,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                     }
                     return Marker(
                       point: LatLng(u.lat, u.lng),
-                      width: 72,
-                      height: u.priority.isNotEmpty ? 100 : 72,
+                      width: 80,
+                      height: u.priority.isNotEmpty ? 116 : 88,
                       alignment: Alignment.bottomCenter,
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
@@ -583,24 +594,36 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                             ),
                             child: Icon(ico, color: Colors.white, size: 18),
                           ),
-                          // Name label
+                          // Name + last seen label
                           Container(
-                            constraints: const BoxConstraints(maxWidth: 68),
+                            constraints: const BoxConstraints(maxWidth: 76),
                             padding: const EdgeInsets.symmetric(
                                 horizontal: 4, vertical: 2),
                             decoration: BoxDecoration(
                               color: AppTheme.bgCard.withOpacity(0.9),
                               borderRadius: BorderRadius.circular(4),
                             ),
-                            child: Text(
-                              u.displayName,
-                              style: const TextStyle(
-                                  color: AppTheme.textPrimary,
-                                  fontSize: 8,
-                                  fontWeight: FontWeight.w700),
-                              overflow: TextOverflow.ellipsis,
-                              maxLines: 1,
-                              textAlign: TextAlign.center,
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text(
+                                  u.displayName,
+                                  style: const TextStyle(
+                                      color: AppTheme.textPrimary,
+                                      fontSize: 8,
+                                      fontWeight: FontWeight.w700),
+                                  overflow: TextOverflow.ellipsis,
+                                  maxLines: 1,
+                                  textAlign: TextAlign.center,
+                                ),
+                                Text(
+                                  _lastSeen(u.timestamp),
+                                  style: const TextStyle(
+                                      color: AppTheme.textSecondary,
+                                      fontSize: 7),
+                                  textAlign: TextAlign.center,
+                                ),
+                              ],
                             ),
                           ),
                           Container(width: 2, height: 5, color: c),
@@ -861,6 +884,18 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                         textAlign: TextAlign.center,
                       ),
                     ),
+                    if (!_isSOS) ...[
+                      const SizedBox(height: 6),
+                      const Text(
+                        'Tap → confirm → 5s countdown',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          color: AppTheme.textSecondary,
+                          fontSize: 11,
+                          letterSpacing: 0.5,
+                        ),
+                      ),
+                    ],
                   ],
 
                   if (role == UserRole.responder) ...[
