@@ -1,0 +1,51 @@
+name: sankatmitra
+description: "SankatMitra (CrisisLink) - A real-time crisis response app with multi-layer location sharing"
+publish_to: 'none'
+
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.5.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  cupertino_icons: ^1.0.8
+
+  # Location
+  geolocator: ^13.0.2
+  permission_handler: ^11.3.1
+
+  # Maps (FREE - OpenStreetMap via flutter_map, no API key needed)
+  flutter_map: ^7.0.2
+  latlong2: ^0.9.1
+
+  # Backend (FREE - Supabase replaces Firebase)
+  supabase_flutter: ^2.12.4
+
+  # Connectivity
+  internet_connection_checker: ^3.0.1
+  connectivity_plus: ^6.0.5
+
+  # P2P Offline
+  nearby_connections: ^4.1.0
+
+  # SMS Fallback
+  telephony: ^0.2.0
+
+  # Utils
+  uuid: ^4.5.1
+  shared_preferences: ^2.3.2
+  flutter_spinkit: ^5.2.1
+  intl: ^0.19.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/
