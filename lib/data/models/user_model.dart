@@ -3,13 +3,15 @@ enum UserRole { victim, responder, coordinator }
 class UserModel {
   final String userId;
   final String sessionId;
-  final String name;        // NEW: display name / callsign
+  final String name;
   final UserRole role;
   final double lat;
   final double lng;
   final int timestamp;
   final bool isSOS;
-  final String priority;    // NEW: AI triage result — 'P0','P1','P2','P3',''
+  final String priority;    // AI triage: 'P0','P1','P2','P3',''
+  final bool onMyWay;       // NEW: responder tapped "I'm on my way"
+  final String onMyWayTo;   // NEW: userId of the victim being navigated to
 
   const UserModel({
     required this.userId,
@@ -21,6 +23,8 @@ class UserModel {
     required this.timestamp,
     this.isSOS = false,
     this.priority = '',
+    this.onMyWay = false,
+    this.onMyWayTo = '',
   });
 
   factory UserModel.fromMap(String userId, Map<dynamic, dynamic> map) {
@@ -34,6 +38,8 @@ class UserModel {
       timestamp: map['timestamp'] ?? 0,
       isSOS: map['isSOS'] ?? false,
       priority: map['priority'] ?? '',
+      onMyWay: map['onMyWay'] ?? false,
+      onMyWayTo: map['onMyWayTo'] ?? '',
     );
   }
 
@@ -48,6 +54,8 @@ class UserModel {
       timestamp: row['timestamp'] ?? 0,
       isSOS: row['is_sos'] ?? false,
       priority: row['priority'] ?? '',
+      onMyWay: row['on_my_way'] ?? false,
+      onMyWayTo: row['on_my_way_to'] ?? '',
     );
   }
 
@@ -61,6 +69,8 @@ class UserModel {
       'timestamp': timestamp,
       'isSOS': isSOS,
       'priority': priority,
+      'onMyWay': onMyWay,
+      'onMyWayTo': onMyWayTo,
     };
   }
 
@@ -74,6 +84,8 @@ class UserModel {
     int? timestamp,
     bool? isSOS,
     String? priority,
+    bool? onMyWay,
+    String? onMyWayTo,
   }) {
     return UserModel(
       userId: userId ?? this.userId,
@@ -85,20 +97,37 @@ class UserModel {
       timestamp: timestamp ?? this.timestamp,
       isSOS: isSOS ?? this.isSOS,
       priority: priority ?? this.priority,
+      onMyWay: onMyWay ?? this.onMyWay,
+      onMyWayTo: onMyWayTo ?? this.onMyWayTo,
     );
   }
 
-  /// Human-readable display name — falls back to shortened userId
   String get displayName {
     if (name.isNotEmpty) return name;
     return 'User-${userId.length > 6 ? userId.substring(userId.length - 6) : userId}';
   }
 
+  /// Seconds since last location update
+  int get secondsSinceUpdate {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    return ((now - timestamp) / 1000).round();
+  }
+
+  /// "X min ago" string
+  String get lastSeenLabel {
+    final secs = secondsSinceUpdate;
+    if (secs < 10) return 'just now';
+    if (secs < 60) return '${secs}s ago';
+    final mins = (secs / 60).round();
+    if (mins < 60) return '${mins}m ago';
+    return '${(mins / 60).round()}h ago';
+  }
+
   static UserRole _roleFromString(String role) {
     switch (role) {
-      case 'responder': return UserRole.responder;
+      case 'responder':   return UserRole.responder;
       case 'coordinator': return UserRole.coordinator;
-      default: return UserRole.victim;
+      default:            return UserRole.victim;
     }
   }
 }

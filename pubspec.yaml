@@ -21,26 +21,26 @@ dependencies:
   flutter_map: ^7.0.2
   latlong2: ^0.9.1
 
-  # Backend (FREE - Supabase replaces Firebase)
+  # Backend (FREE - Supabase)
   supabase_flutter: ^2.12.4
 
   # Connectivity
   internet_connection_checker: ^3.0.1
   connectivity_plus: ^6.0.5
 
-  # P2P Offline
-  nearby_connections: ^4.1.0
-
-  # SMS Fallback
-  telephony: ^0.2.0
+  # Offline tile caching
+  path_provider: ^2.1.4
+  http: ^1.2.2
 
   # Utils
   uuid: ^4.5.1
-  url_launcher: ^6.3.1
-  http: ^1.2.2
   shared_preferences: ^2.3.2
   flutter_spinkit: ^5.2.1
   intl: ^0.19.0
+
+  # NOTE: nearby_connections and flutter_sms removed —
+  # both use Android v1 embedding incompatible with Flutter 3.41
+  # Stubbed out in their service files below
 
 dev_dependencies:
   flutter_test:

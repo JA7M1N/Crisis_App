@@ -8,7 +8,7 @@ import 'package:sankatmitra/data/models/user_model.dart';
 
 class AppRouter {
   static const String splash = '/';
-  static const String pitch = '/pitch';           // NEW
+  static const String pitch = '/pitch';
   static const String roleSelection = '/role-selection';
   static const String home = '/home';
   static const String dashboard = '/dashboard';
@@ -17,15 +17,35 @@ class AppRouter {
     switch (settings.name) {
       case splash:
         return _fadeRoute(const SplashScreen(), settings);
-      case pitch:                                   // NEW
+
+      case pitch:
         return _fadeRoute(const PitchScreen(), settings);
+
       case roleSelection:
         return _fadeRoute(const RoleSelectionScreen(), settings);
+
       case home:
         final user = settings.arguments as UserModel?;
         return _slideRoute(HomeScreen(user: user), settings);
+
       case dashboard:
+        // ── FIX: Accept UserModel from coordinator role selection ──
+        // If a UserModel is passed, use its sessionId and name.
+        // If navigated to directly (e.g. from HomeScreen icon), no args needed
+        // — dashboard falls back to streaming all sessions.
+        final args = settings.arguments;
+        if (args is UserModel) {
+          return _slideRoute(
+            CoordinatorDashboard(
+              sessionId: args.sessionId,
+              coordinatorName: args.displayName,
+            ),
+            settings,
+          );
+        }
+        // No args — show all sessions (global coordinator view)
         return _slideRoute(const CoordinatorDashboard(), settings);
+
       default:
         return MaterialPageRoute(
           builder: (_) => Scaffold(
@@ -57,7 +77,8 @@ class AppRouter {
           begin: const Offset(1.0, 0.0),
           end: Offset.zero,
         ).chain(CurveTween(curve: Curves.easeInOut));
-        return SlideTransition(position: animation.drive(tween), child: child);
+        return SlideTransition(
+            position: animation.drive(tween), child: child);
       },
       transitionDuration: const Duration(milliseconds: 400),
     );

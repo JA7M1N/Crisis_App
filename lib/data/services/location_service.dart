@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:flutter/foundation.dart';
 import 'package:geolocator/geolocator.dart';
 
 class LocationService {
@@ -8,65 +9,85 @@ class LocationService {
 
   StreamSubscription<Position>? _positionStream;
   final StreamController<Position> _positionController =
-      StreamController<Position>.broadcast();
+  StreamController<Position>.broadcast();
 
   Stream<Position> get positionStream => _positionController.stream;
   Position? _lastPosition;
   Position? get lastPosition => _lastPosition;
 
-  /// Request all required location permissions
   Future<bool> requestPermissions() async {
-    bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
-    if (!serviceEnabled) return false;
-
-    LocationPermission permission = await Geolocator.checkPermission();
-    if (permission == LocationPermission.denied) {
-      permission = await Geolocator.requestPermission();
-      if (permission == LocationPermission.denied) return false;
+    try {
+      bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) return false;
+      LocationPermission permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+        if (permission == LocationPermission.denied) return false;
+      }
+      if (permission == LocationPermission.deniedForever) return false;
+      return true;
+    } catch (_) {
+      // On web, permission check may throw — let getCurrentPosition handle it
+      return true;
     }
-    if (permission == LocationPermission.deniedForever) return false;
-    return true;
   }
 
-  /// Get single current position
   Future<Position?> getCurrentPosition() async {
     try {
-      final granted = await requestPermissions();
-      if (!granted) return null;
-      final pos = await Geolocator.getCurrentPosition(
-        locationSettings: const LocationSettings(
-          accuracy: LocationAccuracy.high,
-          timeLimit: Duration(seconds: 10),
-        ),
+      await requestPermissions();
+
+      // Web: timeLimit causes UnimplementedError on some browsers — skip it
+      final settings = kIsWeb
+          ? const LocationSettings(accuracy: LocationAccuracy.medium)
+          : const LocationSettings(
+        accuracy: LocationAccuracy.high,
+        timeLimit: Duration(seconds: 10),
       );
+
+      final pos = await Geolocator.getCurrentPosition(
+          locationSettings: settings);
       _lastPosition = pos;
       return pos;
     } catch (e) {
-      return null;
+      // Geolocation denied or unavailable — use fallback so Supabase row
+      // still gets written and the user appears on the map
+      debugPrint('[LocationService] Using fallback position: $e');
+      final fallback = _fallbackPosition();
+      _lastPosition = fallback;
+      return fallback;
     }
   }
 
-  /// Start streaming location updates
   void startStreaming() {
     _positionStream?.cancel();
-    _positionStream = Geolocator.getPositionStream(
-      locationSettings: const LocationSettings(
-        accuracy: LocationAccuracy.high,
-        distanceFilter: 10, // meters
-        timeLimit: Duration(seconds: 5),
-      ),
-    ).listen(
-      (pos) {
-        _lastPosition = pos;
-        _positionController.add(pos);
-      },
-      onError: (e) {
-        // Silently continue on error
-      },
-    );
+    try {
+      _positionStream = Geolocator.getPositionStream(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.medium,
+          distanceFilter: 10,
+        ),
+      ).listen(
+            (pos) {
+          _lastPosition = pos;
+          _positionController.add(pos);
+        },
+        onError: (e) {
+          debugPrint('[LocationService] Stream error, using fallback: $e');
+          // Push fallback so the Supabase row exists and UI stays non-empty
+          final fallback = _fallbackPosition();
+          _lastPosition = fallback;
+          _positionController.add(fallback);
+        },
+      );
+    } catch (e) {
+      debugPrint('[LocationService] startStreaming threw: $e');
+      // Push one fallback position so the session row is created
+      final fallback = _fallbackPosition();
+      _lastPosition = fallback;
+      _positionController.add(fallback);
+    }
   }
 
-  /// Stop location streaming
   void stopStreaming() {
     _positionStream?.cancel();
     _positionStream = null;
@@ -75,5 +96,24 @@ class LocationService {
   void dispose() {
     stopStreaming();
     _positionController.close();
+  }
+
+  /// Fallback position near Vadodara with a tiny random offset so multiple
+  /// demo users don't stack on the exact same pixel.
+  Position _fallbackPosition() {
+    // Use microsecond as cheap random seed — different each call
+    final jitter = (DateTime.now().microsecond / 1000000.0 - 0.5) * 0.04;
+    return Position(
+      latitude: 22.3072 + jitter,
+      longitude: 73.1812 + jitter,
+      timestamp: DateTime.now(),
+      accuracy: 50,
+      altitude: 0,
+      altitudeAccuracy: 0,
+      heading: 0,
+      headingAccuracy: 0,
+      speed: 0,
+      speedAccuracy: 0,
+    );
   }
 }

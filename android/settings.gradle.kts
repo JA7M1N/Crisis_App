@@ -22,6 +22,4 @@ plugins {
     id("dev.flutter.flutter-gradle-plugin") version "1.0.0" apply false
 }
 
-// REMOVED: id("com.google.gms.google-services") -- Firebase no longer used
-
 include(":app")

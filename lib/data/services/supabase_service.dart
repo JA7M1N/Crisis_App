@@ -1,27 +1,26 @@
 import 'dart:async';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:sankatmitra/data/models/user_model.dart';
+import 'package:sankatmitra/data/models/broadcast_message_model.dart';
 
-/// SupabaseService — real-time backend replacing Firebase.
+/// SupabaseService — real-time backend.
 ///
-/// SQL to run in Supabase SQL Editor (one-time setup):
+/// SQL to run once in Supabase SQL Editor:
 /// ─────────────────────────────────────────────────────
-/// create table if not exists session_users (
-///   user_id     text not null,
+/// -- Add on_my_way column to existing table:
+/// alter table session_users add column if not exists on_my_way boolean not null default false;
+///
+/// -- Broadcast messages table:
+/// create table if not exists broadcast_messages (
+///   id          uuid primary key default gen_random_uuid(),
 ///   session_id  text not null,
-///   name        text not null default '',
-///   role        text not null default 'victim',
-///   lat         double precision not null default 0,
-///   lng         double precision not null default 0,
-///   timestamp   bigint not null,
-///   is_sos      boolean not null default false,
-///   priority    text not null default '',
-///   updated_at  timestamptz not null default now(),
-///   primary key (session_id, user_id)
+///   sender_name text not null,
+///   message     text not null,
+///   created_at  timestamptz not null default now()
 /// );
-/// alter table session_users enable row level security;
-/// create policy "allow all" on session_users for all using (true) with check (true);
-/// alter publication supabase_realtime add table session_users;
+/// alter table broadcast_messages enable row level security;
+/// create policy "allow all" on broadcast_messages for all using (true) with check (true);
+/// alter publication supabase_realtime add table broadcast_messages;
 /// ─────────────────────────────────────────────────────
 
 class SupabaseService {
@@ -31,8 +30,11 @@ class SupabaseService {
 
   final SupabaseClient _client = Supabase.instance.client;
   static const _table = 'session_users';
+  static const _broadcastTable = 'broadcast_messages';
 
-  /// Upsert user location + name + priority
+  // ── User Location ──────────────────────────────────────────────────────────
+
+  /// Upsert user location + name + priority + onMyWay
   Future<void> updateUserLocation({
     required String sessionId,
     required String userId,
@@ -42,6 +44,7 @@ class SupabaseService {
     required UserRole role,
     bool isSOS = false,
     String priority = '',
+    bool onMyWay = false,
   }) async {
     await _client.from(_table).upsert({
       'user_id': userId,
@@ -53,6 +56,7 @@ class SupabaseService {
       'timestamp': DateTime.now().millisecondsSinceEpoch,
       'is_sos': isSOS,
       'priority': priority,
+      'on_my_way': onMyWay,
       'updated_at': DateTime.now().toIso8601String(),
     }, onConflict: 'session_id,user_id');
   }
@@ -144,5 +148,67 @@ class SupabaseService {
         .delete()
         .eq('session_id', sessionId)
         .eq('user_id', userId);
+  }
+
+  // ── Broadcast Messages ─────────────────────────────────────────────────────
+
+  /// Send a broadcast alert to all members of a session.
+  Future<void> sendBroadcast({
+    required String sessionId,
+    required String senderName,
+    required String message,
+  }) async {
+    await _client.from(_broadcastTable).insert({
+      'session_id': sessionId,
+      'sender_name': senderName,
+      'message': message,
+    });
+  }
+
+  /// Stream broadcast messages for a session, newest first.
+  Stream<List<BroadcastMessage>> streamBroadcasts(String sessionId) {
+    final controller = StreamController<List<BroadcastMessage>>.broadcast();
+
+    _fetchBroadcasts(sessionId).then((msgs) {
+      if (!controller.isClosed) controller.add(msgs);
+    });
+
+    final channel = _client
+        .channel('broadcasts:$sessionId')
+        .onPostgresChanges(
+      event: PostgresChangeEvent.insert,
+      schema: 'public',
+      table: _broadcastTable,
+      filter: PostgresChangeFilter(
+        type: PostgresChangeFilterType.eq,
+        column: 'session_id',
+        value: sessionId,
+      ),
+      callback: (_) {
+        _fetchBroadcasts(sessionId).then((msgs) {
+          if (!controller.isClosed) controller.add(msgs);
+        });
+      },
+    )
+        .subscribe();
+
+    controller.onCancel = () {
+      _client.removeChannel(channel);
+      controller.close();
+    };
+
+    return controller.stream;
+  }
+
+  Future<List<BroadcastMessage>> _fetchBroadcasts(String sessionId) async {
+    final data = await _client
+        .from(_broadcastTable)
+        .select()
+        .eq('session_id', sessionId)
+        .order('created_at', ascending: false)
+        .limit(20);
+    return (data as List)
+        .map((r) => BroadcastMessage.fromSupabase(r))
+        .toList();
   }
 }

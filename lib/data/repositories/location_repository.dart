@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'package:geolocator/geolocator.dart';
 import 'package:sankatmitra/data/models/user_model.dart';
 import 'package:sankatmitra/data/services/location_service.dart';
 import 'package:sankatmitra/data/services/supabase_service.dart';
@@ -7,6 +6,7 @@ import 'package:sankatmitra/data/services/connectivity_service.dart';
 import 'package:sankatmitra/data/services/sms_service.dart';
 import 'package:sankatmitra/data/services/nearby_service.dart';
 import 'package:sankatmitra/data/services/ai_triage_service.dart';
+import 'package:sankatmitra/data/services/incident_timeline_service.dart';
 
 class LocationRepository {
   final LocationService _locationService;
@@ -15,12 +15,14 @@ class LocationRepository {
   final SmsService _smsService;
   final NearbyService _nearbyService;
   final AiTriageService _aiTriageService;
+  final IncidentTimelineService _timeline = IncidentTimelineService();
 
   StreamSubscription<ConnectivityLayer>? _layerSub;
   Timer? _updateTimer;
 
   UserModel? _currentUser;
   bool _isSOS = false;
+  bool _onMyWay = false;
   String _currentPriority = '';
   List<String> _emergencyContacts = [];
 
@@ -28,7 +30,10 @@ class LocationRepository {
   StreamController<List<UserModel>>.broadcast();
 
   Stream<List<UserModel>> get usersStream => _usersController.stream;
-  UserModel? get currentUser => _currentUser; // expose for demo seed positioning
+  UserModel? get currentUser => _currentUser;
+
+  /// Expose so home_screen can call streamBroadcasts directly
+  SupabaseService get supabaseService => _supabaseService;
 
   LocationRepository({
     LocationService? locationService,
@@ -65,10 +70,25 @@ class LocationRepository {
         .streamSessionUsers(user.sessionId)
         .listen((users) => _usersController.add(users));
 
+    // Log user joined to Supabase timeline
+    await _timeline.logUserJoined(
+      sessionId: user.sessionId,
+      actorName: user.displayName,
+      role: user.role.name,
+    );
+
     _pushLocationUpdate();
   }
 
   void _onLayerChanged(ConnectivityLayer layer) {
+    if (_currentUser != null) {
+      _timeline.logLayerSwitch(
+        sessionId: _currentUser!.sessionId,
+        actorName: _currentUser!.displayName,
+        layer: layer,
+      );
+    }
+
     if (layer == ConnectivityLayer.bluetooth && !_nearbyService.isRunning) {
       _nearbyService.startNearby(userName: _currentUser?.userId ?? 'unknown');
       _nearbyService.onPeerLocationReceived = (id, lat, lng) {
@@ -96,6 +116,7 @@ class LocationRepository {
       timestamp: DateTime.now().millisecondsSinceEpoch,
       isSOS: _isSOS,
       priority: _currentPriority,
+      onMyWay: _onMyWay,
     );
 
     final layer = _connectivityService.currentLayer;
@@ -112,6 +133,7 @@ class LocationRepository {
             role: _currentUser!.role,
             isSOS: _isSOS,
             priority: _currentPriority,
+            onMyWay: _onMyWay,
           );
         } catch (_) {
           _connectivityService.switchToBluetooth();
@@ -134,23 +156,28 @@ class LocationRepository {
     }
   }
 
-  /// Trigger SOS with optional incident description for AI triage
   Future<void> triggerSOS({String incidentDescription = ''}) async {
     _isSOS = true;
 
-    // Run AI triage in background — SOS broadcasts immediately, doesn't wait
+    if (_currentUser != null) {
+      await _timeline.logSOS(
+        sessionId: _currentUser!.sessionId,
+        actorName: _currentUser!.displayName,
+        description: incidentDescription,
+      );
+    }
+
     if (incidentDescription.isNotEmpty) {
       _aiTriageService.triageIncident(incidentDescription).then((priority) {
         if (priority.isNotEmpty) {
           _currentPriority = priority;
-          _pushLocationUpdate(); // push again with priority
+          _pushLocationUpdate();
         }
       });
     }
 
     await _pushLocationUpdate();
 
-    // Always try SMS fallback on SOS
     final pos = _locationService.lastPosition;
     if (pos != null && _emergencyContacts.isNotEmpty) {
       await _smsService.sendSosToAll(
@@ -164,7 +191,31 @@ class LocationRepository {
   void cancelSOS() {
     _isSOS = false;
     _currentPriority = '';
+    _onMyWay = false;
+
+    if (_currentUser != null) {
+      _timeline.logSOSCancelled(
+        sessionId: _currentUser!.sessionId,
+        actorName: _currentUser!.displayName,
+      );
+    }
+
     _pushLocationUpdate();
+  }
+
+  /// Responder sets "I'm on my way" — logged to timeline with target name.
+  Future<void> setOnMyWay({required bool value, String targetName = ''}) async {
+    _onMyWay = value;
+
+    if (value && _currentUser != null) {
+      await _timeline.logResponderArrival(
+        sessionId: _currentUser!.sessionId,
+        actorName: _currentUser!.displayName,
+        targetName: targetName.isEmpty ? 'victim' : targetName,
+      );
+    }
+
+    await _pushLocationUpdate();
   }
 
   Future<void> stopSession() async {

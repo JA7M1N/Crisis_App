@@ -1,7 +1,6 @@
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
-    // REMOVED: id("com.google.gms.google-services") -- No Firebase/Google Services needed
     id("dev.flutter.flutter-gradle-plugin")
 }
 

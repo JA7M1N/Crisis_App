@@ -488,14 +488,6 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "0.17.6"
-  nearby_connections:
-    dependency: "direct main"
-    description:
-      name: nearby_connections
-      sha256: "94d500bdb11f9a3db3b1cb2949ab438107e581f0142380efc17ecc8038e99369"
-      url: "https://pub.dev"
-    source: hosted
-    version: "4.3.0"
   nm:
     dependency: transitive
     description:
@@ -529,7 +521,7 @@ packages:
     source: hosted
     version: "1.9.1"
   path_provider:
-    dependency: transitive
+    dependency: "direct main"
     description:
       name: path_provider
       sha256: "50c5dd5b6e1aaf6fb3a78b33f6aa3afca52bf903a8a5298f53101fdaee55bbcd"
@@ -837,14 +829,6 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "2.12.4"
-  telephony:
-    dependency: "direct main"
-    description:
-      name: telephony
-      sha256: "821e074acec3c611e48edadd50a6d9fef864943771a545da7924adcc8509ada9"
-      url: "https://pub.dev"
-    source: hosted
-    version: "0.2.0"
   term_glyph:
     dependency: transitive
     description:
@@ -878,7 +862,7 @@ packages:
     source: hosted
     version: "0.3.1"
   url_launcher:
-    dependency: "direct main"
+    dependency: transitive
     description:
       name: url_launcher
       sha256: f6a7e5c4835bb4e3026a04793a4199ca2d14c739ec378fdfe23fc8075d0439f8

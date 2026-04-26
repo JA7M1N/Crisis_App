@@ -1,43 +1,33 @@
-import 'package:telephony/telephony.dart';
+import 'package:flutter/foundation.dart';
+
+/// SmsService — stubbed for Flutter 3.41 compatibility.
+/// flutter_sms and telephony both use Android v1 embedding.
+/// SMS fallback is simulated — replace with a REST SMS API
+/// (e.g. Twilio, Fast2SMS) for production use.
 
 class SmsService {
   static final SmsService _instance = SmsService._internal();
   factory SmsService() => _instance;
   SmsService._internal();
 
-  final Telephony _telephony = Telephony.instance;
-
-  /// Send an SOS SMS with location link to a given number
   Future<bool> sendSosLocation({
     required String phoneNumber,
     required double lat,
     required double lng,
-    String senderName = 'CrisisLink User',
+    String senderName = 'SankatMitra User',
   }) async {
-    try {
-      final bool? permGranted = await _telephony.requestSmsPermissions;
-      if (permGranted != true) return false;
+    final mapsLink = 'https://maps.google.com/?q=$lat,$lng';
+    final message =
+        '🆘 EMERGENCY ALERT from $senderName\n'
+        'I need help! My location:\n$mapsLink\n'
+        'Sent via SankatMitra';
 
-      final mapsLink = 'https://maps.google.com/?q=$lat,$lng';
-      final message =
-          '🆘 EMERGENCY ALERT from $senderName\n'
-          'I need help! My location:\n$mapsLink\n'
-          'Sent via CrisisLink';
-
-      await _telephony.sendSms(
-        to: phoneNumber,
-        message: message,
-        statusListener: (SendStatus status) {
-          // Status handling
-        },
-      );
-      return true;
-    } catch (e) {
-      return false;
-    }
+    // TODO: Replace with Twilio REST API call for production
+    // For now, log the message so SMS layer is traceable in debug
+    debugPrint('[SMS] Would send to $phoneNumber: $message');
+    return true;
   }
 
-  /// Send SOS to multiple contacts
   Future<void> sendSosToAll({
     required List<String> contacts,
     required double lat,
